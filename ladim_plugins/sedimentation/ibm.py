@@ -384,11 +384,13 @@ def sinkvel_cdf_tables(cfg):
 
 
 def sinkvel(n, cfg = 'bannister2016'):
-    from scipy.interpolate import InterpolatedUnivariateSpline
+    #from scipy.interpolate import InterpolatedUnivariateSpline
+    from scipy.interpolate import PchipInterpolator
 
     sinkvel_tab, cumprob_tab = sinkvel_cdf_tables(cfg)
 
-    fn = InterpolatedUnivariateSpline(cumprob_tab, sinkvel_tab, k=2)
+    #fn = InterpolatedUnivariateSpline(cumprob_tab, sinkvel_tab, k=2)
+    fn = PchipInterpolator(cumprob_tab, sinkvel_tab, extrapolate=False)
     return fn(np.random.rand(n))
 
 
