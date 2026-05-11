@@ -20,6 +20,8 @@ import ladim.gridforce.ROMS
 from ladim.sample import sample2D, bilin_inv
 from ladim.gridforce.ROMS import sample3D, z2s
 
+logger = logging.getLogger(__name__)
+
 class Grid(ladim.gridforce.ROMS.Grid):
     def __init__(self, config):
         super().__init__(config)
@@ -101,18 +103,100 @@ class Forcing(ladim.gridforce.ROMS.Forcing):
                 self.W += self.dW
 
 
+    # def vertdiff(self, X, Y, Z, name):
+    #     MAXIMUM_K = len(self._grid.Cs_w) - 2
+    #     MINIMUM_K = 1
+    #     MINIMUM_D = 0
+
+    #     I = np.int32(np.round(X)) - self._grid.i0
+    #     J = np.int32(np.round(Y)) - self._grid.j0
+    #     K, A = z2s(self._grid.z_w, I, J, Z)
+    #     K_nearest = np.round(K - A).astype(np.int32)
+    #     K_nearest = np.minimum(MAXIMUM_K, K_nearest)
+    #     K_nearest = np.maximum(MINIMUM_K, K_nearest)
+    #     F = self[name]
+    #     return np.maximum(MINIMUM_D, F[K_nearest, J, I])
+
     def vertdiff(self, X, Y, Z, name):
         MAXIMUM_K = len(self._grid.Cs_w) - 2
         MINIMUM_K = 1
-        MINIMUM_D = 0
+        MINIMUM_D = 0.0
 
-        I = np.int32(np.round(X)) - self._grid.i0
-        J = np.int32(np.round(Y)) - self._grid.j0
+        F = self[name]
+        jmax, imax = F.shape[1], F.shape[2]
+
+        X = np.asarray(X)
+        Y = np.asarray(Y)
+        Z = np.asarray(Z)
+
+        bad_coord = ~np.isfinite(X) | ~np.isfinite(Y) | ~np.isfinite(Z)
+
+        if np.any(bad_coord):
+            idx = np.flatnonzero(bad_coord)[:10]
+            logger.warning(
+                "vertdiff(%s): %d non-finite particle coordinate(s). "
+                "Examples: idx=%s X=%s Y=%s Z=%s",
+                name,
+                np.count_nonzero(bad_coord),
+                idx.tolist(),
+                X[idx],
+                Y[idx],
+                Z[idx],
+            )
+
+        # Replace non-finite values with safe defaults
+        X_safe = np.where(np.isfinite(X), X, self._grid.i0)
+        Y_safe = np.where(np.isfinite(Y), Y, self._grid.j0)
+        Z_safe = np.where(np.isfinite(Z), Z, 0.0)
+
+        # Horizontal indices
+        I = np.int32(np.round(X_safe)) - self._grid.i0
+        J = np.int32(np.round(Y_safe)) - self._grid.j0
+
+        bad_index = (I < 0) | (I >= imax) | (J < 0) | (J >= jmax)
+
+        if np.any(bad_index):
+            idx = np.flatnonzero(bad_index)[:10]
+            logger.warning(
+                "vertdiff(%s): %d out-of-bounds horizontal index/indices before clipping. "
+                "Grid shape: jmax=%d imax=%d. Examples: idx=%s I=%s J=%s X=%s Y=%s",
+                name,
+                np.count_nonzero(bad_index),
+                jmax,
+                imax,
+                idx.tolist(),
+                I[idx],
+                J[idx],
+                X_safe[idx],
+                Y_safe[idx],
+            )
+
+        # Clip to valid bounds (same idea as horzdiff)
+        I = np.clip(I, 0, imax - 1)
+        J = np.clip(J, 0, jmax - 1)
+
+        # Vertical index
         K, A = z2s(self._grid.z_w, I, J, Z)
         K_nearest = np.round(K - A).astype(np.int32)
-        K_nearest = np.minimum(MAXIMUM_K, K_nearest)
-        K_nearest = np.maximum(MINIMUM_K, K_nearest)
-        F = self[name]
+
+        bad_k = (K_nearest < MINIMUM_K) | (K_nearest > MAXIMUM_K)
+        if np.any(bad_k):
+            idx = np.flatnonzero(bad_k)[:10]
+            logger.debug(
+                "vertdiff(%s): %d vertical index/indices clipped. "
+                "Allowed K=%d..%d. Examples: idx=%s K=%s Z=%s I=%s J=%s",
+                name,
+                np.count_nonzero(bad_k),
+                MINIMUM_K,
+                MAXIMUM_K,
+                idx.tolist(),
+                K_nearest[idx],
+                Z_safe[idx],
+                I[idx],
+                J[idx],
+            )
+        K_nearest = np.clip(K_nearest, MINIMUM_K, MAXIMUM_K)
+
         return np.maximum(MINIMUM_D, F[K_nearest, J, I])
 
     def horzdiff(self, X, Y, Z):

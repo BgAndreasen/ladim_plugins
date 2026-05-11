@@ -1,5 +1,16 @@
 import numpy as np
+import logging
 
+logger = logging.getLogger(__name__)
+
+def _bad_xy(state):
+    x = np.asarray(state.X)
+    y = np.asarray(state.Y)
+
+    return (
+        ~np.isfinite(x) | ~np.isfinite(y) |
+        (np.abs(x) > 1e6) | (np.abs(y) > 1e6)
+    )
 
 class IBM:
     def __init__(self, config):
@@ -38,27 +49,52 @@ class IBM:
         self.state = state
         self.forcing = forcing
 
+        self.check_xy("START update_ibm")
+
         if self.land_collision == "reposition":
             self.reposition()
+            self.check_xy("AFTER reposition")
         elif self.land_collision == "coastal_diffusion":
             self.coastal_diffusion()
+            self.check_xy("AFTER coastal_diffusion")
 
         if self.vertadv:
             self.advect()
+            self.check_xy("AFTER vertical advect")
 
         if isinstance(self.D, str):
             self.diffuse_labolle()
+            self.check_xy("AFTER diffuse_labolle")
         elif self.D:
             self.diffuse_const()
+            self.check_xy("AFTER diffuse_const")
 
         if self.horzdiff_type == 'smagorinsky':
             self.horzdiff()
+            self.check_xy("AFTER horzdiff")
 
         if self.land_collision == "reposition":
             self.store_position()
+            self.check_xy("AFTER store position")
 
         if self.lifespan is not None:
             self.kill_old()
+    
+    def check_xy(self, label):
+        bad = _bad_xy(self.state)
+
+        if np.any(bad):
+            idx = np.flatnonzero(bad)[:10]
+            msg = (
+                f"{label}: bad X/Y detected. "
+                f"idx={idx.tolist()} "
+                f"pid={self.state.pid[idx]} "
+                f"X={self.state.X[idx]} "
+                f"Y={self.state.Y[idx]} "
+                f"Z={self.state.Z[idx]}"
+            )
+            logger.warning(msg)
+            raise RuntimeError(msg)
 
     def advect(self):
         # Vertical advection
@@ -174,9 +210,9 @@ class IBM:
         self.state.Y[pidx_new_onland] = y_new
 
     def store_position(self):
-        self.x = self.state.X
-        self.y = self.state.Y
-        self.pid = self.state.pid
+        self.x = self.state.X.copy()
+        self.y = self.state.Y.copy()
+        self.pid = self.state.pid.copy()
 
     def coastal_diffusion(self):
         # If particles are close to coast, reposition them within the cell
