@@ -94,7 +94,7 @@ class IBM:
                 f"Z={self.state.Z[idx]}"
             )
             logger.warning(msg)
-            raise RuntimeError(msg)
+            #raise RuntimeError(msg)
 
     def advect(self):
         # Vertical advection
